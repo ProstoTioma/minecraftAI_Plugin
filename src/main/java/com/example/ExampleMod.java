@@ -62,19 +62,17 @@ public class ExampleMod implements ModInitializer {
         LOGGER.info("Starting...");
         String host = "127.0.0.1";  // localhost
         int port = 12345;
+        ScheduledExecutorService executor  = Executors.newScheduledThreadPool(1);
+
 
         // Create a socket to connect to the Python script
         Socket socket = null;
+        OutputStream outputStream = null;
+
         try {
             socket = new Socket(host, port);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        // Create an output stream to send data to the Python script
-        OutputStream outputStream = null;
-        try {
             outputStream = socket.getOutputStream();
+
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -91,6 +89,26 @@ public class ExampleMod implements ModInitializer {
                         return 10;
                     }));
         });
+
+        OutputStream finalOutputStream = outputStream;
+        Socket finalSocket = socket;
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(literal("c")
+                    .executes(context -> {
+                        out.println("close");
+                        out.close();
+                        try {
+                            finalOutputStream.close();
+                            finalSocket.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                        executor.shutdown();
+                        context.getSource().sendFeedback(() -> Text.literal("Closed the socket :)"), false);
+                        return 10;
+                    }));
+        });
+
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(literal("inventory")
@@ -133,7 +151,7 @@ public class ExampleMod implements ModInitializer {
                                 PlayerEntity player = source.getPlayer();
                                 World world = source.getWorld();
                                 BlockPos playerPos = player.getBlockPos();
-                                ArrayList<BlockInfo> blocks = new ArrayList<>();
+                                StringBuilder blocks = new StringBuilder();
 
                                 for (int dx = -distance; dx <= distance; dx++) {
                                     for (int dz = -distance; dz <= distance; dz++) {
@@ -144,12 +162,12 @@ public class ExampleMod implements ModInitializer {
                                             if (block != Blocks.AIR) { // Exclude air blocks
                                                 LOGGER.info("Block at: " + currentPos + ", Type: " + block);
                                                 source.sendFeedback(() -> Text.literal("Block at: %s, type: %s".formatted(currentPos, block)), false);
-                                                blocks.add(new BlockInfo(block, currentPos));
+                                                blocks.append(block.toString()).append(" & ").append(currentPos.toString()).append("%");
                                             }
                                         }
                                     }
                                 }
-                                source.sendFeedback(() -> Text.literal("Amount of blocks found: %s".formatted(blocks.size())), false);
+                                System.out.println(blocks);
                                 return 1;
 
                             })));
@@ -165,7 +183,7 @@ public class ExampleMod implements ModInitializer {
                         System.setOut(ps);
 
                         // Execute the info command
-                        ParseResults<ServerCommandSource> parseResults = dispatcher.parse("info", context.getSource());
+                        ParseResults<ServerCommandSource> parseResults = dispatcher.parse("getNearBlocks 3", context.getSource());
                         try {
                             dispatcher.execute(parseResults);
                         } catch (CommandSyntaxException e) {
@@ -180,7 +198,10 @@ public class ExampleMod implements ModInitializer {
                         String infoOutput = baos.toString();
 
                         // Send the captured output to Python
+                        PlayerEntity player = context.getSource().getPlayer();
+                        out.println("Player position: " + Math.round(player.getX()) + " " + Math.round(player.getY()) + " " + Math.round(player.getZ()));
                         out.println(infoOutput);
+
                         return 1;
                     }));
         });
@@ -188,7 +209,6 @@ public class ExampleMod implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(CommandManager.literal("start")
                     .executes(context -> {
-                        ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
                         executor.scheduleAtFixedRate(() -> {
                             try {
                                 ParseResults<ServerCommandSource> parseResults2 = dispatcher.parse("send", context.getSource());
@@ -204,23 +224,5 @@ public class ExampleMod implements ModInitializer {
         });
 
 
-    }
-
-    class BlockInfo {
-        private Block block;
-        private BlockPos position;
-
-        public BlockInfo(Block block, BlockPos position) {
-            this.block = block;
-            this.position = position;
-        }
-
-        public Block getBlock() {
-            return block;
-        }
-
-        public BlockPos getPosition() {
-            return position;
-        }
     }
 }
